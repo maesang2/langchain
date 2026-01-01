@@ -1,14 +1,11 @@
 import streamlit as st
-from langchain.embeddings import OpenAIEmbeddings, CacheBackedEmbeddings
-from langchain.document_loaders import UnstructuredFileLoader
-from langchain.vectorstores import FAISS
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.storage import LocalFileStore
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema.runnable import RunnablePassthrough, RunnableLambda
-from langchain.chat_models import ChatOpenAI
-from langchain.callbacks.base import BaseCallbackHandler
-from langchain.memory import ConversationBufferMemory
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain.embeddings import CacheBackedEmbeddings
+from langchain_community.document_loaders import UnstructuredFileLoader
+from langchain_community.vectorstores import FAISS
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from langchain_core.callbacks.base import BaseCallbackHandler
 
 st.set_page_config(
     page_title="DocumentGPT"
