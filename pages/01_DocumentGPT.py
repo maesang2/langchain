@@ -1,6 +1,6 @@
 import streamlit as st
+import os
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain.embeddings import CacheBackedEmbeddings
 from langchain_community.document_loaders import UnstructuredFileLoader
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_community.storage import LocalFileStore
@@ -53,11 +53,16 @@ def embed_file(file):
     docs = loader.load_and_split(text_splitter=splitter)
     # vector store
     embeddings = OpenAIEmbeddings()
-    cached_embeddings = CacheBackedEmbeddings.from_bytes_store(
-        embeddings, cache_dir
-    )
-    vectorstore = FAISS.from_documents(docs, cached_embeddings)
-    retriever = vectorstore.as_retriever()
+    if os.path.exists(cache_dir):
+        vectorstore = FAISS.load_local(
+            cache_dir,
+            embeddings,
+            allow_dangerous_deserialization=True
+        )
+    else:
+        vectorstore = FAISS.from_documents(docs, embeddings)
+        os.makedirs(os.path.dirname(cache_dir), exist_ok=True)
+        vectorstore.save_local(cache_dir)
     # 메모리
     # memory = ConversationBufferMemory(
     #         llm=llm,
