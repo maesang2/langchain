@@ -1,6 +1,8 @@
 import streamlit as st
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.embeddings import CacheBackedEmbeddings
+from langchain_text_splitters import CharacterTextSplitter
+from langchain_community.storage import LocalFileStore
 from langchain_community.document_loaders import UnstructuredFileLoader
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
