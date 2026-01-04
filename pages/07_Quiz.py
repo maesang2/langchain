@@ -7,6 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.callbacks import StreamingStdOutCallbackHandler
 from langchain_core.output_parsers import BaseOutputParser
 import json
+from langchain_core.output_parsers.openai_functions import JsonOutputFunctionsParser
 
 class JsonOutputParser(BaseOutputParser):
     def parse(self, text):
@@ -22,11 +23,66 @@ st.set_page_config(
 
 st.title("QuizGPT")
 
+with st.sidebar:
+    api_key = st.text_input("OpenAI API Key", type="password")
+    
+    if api_key:
+        st.success("API Key 입력 완료")
+    else:
+        st.warning("API Key를 입력하세요")
+
+
+function = {
+    "name": "create_quiz",
+    "description": "function that takes a list of questions and answers and returns a quiz",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "questions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                        },
+                        "answers": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "answer": {
+                                        "type": "string",
+                                    },
+                                    "correct": {
+                                        "type": "boolean",
+                                    },
+                                },
+                                "required": ["answer", "correct"],
+                            },
+                        },
+                    },
+                    "required": ["question", "answers"],
+                },
+            }
+        },
+        "required": ["questions"],
+    },
+}
+
 llm = ChatOpenAI(
-    temperature=0.1,
-    model="gpt-5-2025-08-07",
+    temperature=1,
+    # api_key=api_key,
+    model="gpt-5-nano",
     streaming=True,
     callbacks=[StreamingStdOutCallbackHandler()]
+).bind(
+    function_call={
+        "name": "create_quiz",
+    },
+    functions=[
+        function,
+    ],
 )
 
 def format_docs(docs):
@@ -41,23 +97,23 @@ question_prompt = ChatPromptTemplate.from_messages(
          
     Based ONLY on the following context make 10 questions to test the user's knowledge about the text.
     
+    Difficulty level: {difficulty}
+
     Each question should have 4 answers, three of them must be incorrect and one should be correct.
-         
-    Use (o) to signal the correct answer.
-         
+                  
     Question examples:
          
     Question: What is the color of the ocean?
-    Answers: Red|Yellow|Green|Blue(o)
+    Answers: Red|Yellow|Green|Blue
          
     Question: What is the capital or Georgia?
-    Answers: Baku|Tbilisi(o)|Manila|Beirut
+    Answers: Baku|Tbilisi|Manila|Beirut
          
     Question: When was Avatar released?
-    Answers: 2007|2001|2009(o)|1998
+    Answers: 2007|2001|2009|1998
          
     Question: Who was Julius Caesar?
-    Answers: A Roman Emperor(o)|Painter|Actor|Model
+    Answers: A Roman Emperor|Painter|Actor|Model
          
     Your turn!
          
@@ -214,8 +270,12 @@ def split_file(file):
     return docs
 
 @st.cache_data(show_spinner="Making quiz..")
-def run_quiz_chain(_docs, topic):
-        chain = {"context": questions_chain} | formatting_chain | output_parser
+def run_quiz_chain(_docs, topic, difficulty):
+        chain = {
+            "context": format_docs,
+            "difficulty": lambda x: difficulty
+        } | question_prompt | llm | JsonOutputFunctionsParser()
+
         return chain.invoke(_docs)
 
 @st.cache_data(show_spinner="Searching Wikipedia...")
@@ -257,19 +317,130 @@ if not docs:
     """
     )
 else:
-    response = run_quiz_chain(docs, topic if topic else file.name)
-    st.write(response)
-    with st.form("questions_form"):
-        for question in response["questions"]:
-            st.write(question["question"])
-            value = st.radio("Select an option", [answer["answer"] for answer in question["answers"]],
-                     index=None,
-                     )
+    st.write("문제 난이도를 선택하세요.")
+    
+    if "quiz_state" not in st.session_state:
+        st.session_state.quiz_state = {
+            "selected_button": None,
+            "selected_button_nm": None,
+            "questions": None,
+            "is_submitted": False,
+            "is_completed": False,
+            "user_answers": {}
+        }
+
+    state = st.session_state.quiz_state
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("어려움", type="primary", key="btn1"):
+            st.session_state.quiz_state = {
+                "selected_button": "btn1",
+                "selected_button_nm": "어려움",
+                "difficulty": "hard",
+                "questions": None,
+                "is_submitted": False,
+                "is_completed": False,
+                "user_answers": {}
+            }
+            st.rerun()
+
+    with col2:
+        if st.button("쉬움", type="secondary", key="btn2"):
+            st.session_state.quiz_state = {
+                "selected_button": "btn2",
+                "selected_button_nm": "쉬움",
+                "difficulty": "easy",
+                "questions": None,
+                "is_submitted": False,
+                "is_completed": False,
+                "user_answers": {}
+            }
+            st.rerun()
+
+
+    if state["selected_button"] and state["questions"] is None:
+        difficulty = "Make questions challenging and complex for advanced learners." if state.get("difficulty") == "hard" else "Make questions simple and straightforward for beginners."
+        response = run_quiz_chain(docs, topic if topic else file.name, difficulty)
+        state["questions"] = response["questions"]
+
+    if state["selected_button_nm"] is not None:
+        st.write(f"선택 난이도 {state['selected_button_nm']}")
+
+    if state["questions"] and not state["is_completed"]:
+        with st.form("questions_form"):
+            for idx, question in enumerate(state["questions"]):
+                if state["is_submitted"]:
+                    user_answer = state["user_answers"].get(idx)
+                    is_correct = {"answer": user_answer, "correct": True} in question["answers"] if user_answer else False
+                    color = "green" if is_correct else "red"
+                    st.markdown(f"### :{color}[문제 {idx + 1}]")
+                else:
+                    st.markdown(f"### 문제 {idx + 1}")
+                
+                st.write(question["question"])
+                
+                value = st.radio(
+                    "답을 선택하세요",
+                    [answer["answer"] for answer in question["answers"]],
+                    index=None,
+                    disabled=state["is_submitted"],
+                    key=f"q_{idx}"
+                )
+                
+                if value:
+                    state["user_answers"][idx] = value
+                
+                if state["is_submitted"]:
+                    is_correct = any(a.get("answer") == value and a.get("correct") for a in question["answers"])
+    
+                    if is_correct:
+                        st.success("✅ 정답입니다!")
+                    elif value is not None:
+                        correct_answer = next((a.get("answer") for a in question["answers"] if a.get("correct")), "정답 없음")
+                        st.error(f"❌ 오답입니다. 정답: **{correct_answer}**")
+                    else:
+                        st.warning("⚠️ 답을 선택하지 않았습니다.")
+                
+                st.divider()
+
+            button = st.form_submit_button("제출하기", disabled=state["is_submitted"])
+
+        if button and not state["is_submitted"]:
+            state["is_submitted"] = True
             
+            correct_count = 0
+            for idx, question in enumerate(state["questions"]):
+                user_answer = state["user_answers"].get(idx)
+                if {"answer": user_answer, "correct": True} in question["answers"]:
+                    correct_count += 1
+            
+            st.rerun()
 
-            if {"answer":value, "correct": True} in question["answers"]:
-                st.success("Correct")
-            elif value is not None:
-                st.error("Wrong")
+        if state["is_submitted"]:
+            correct_count = sum(
+                1 for idx, question in enumerate(state["questions"])
+                if {"answer": state["user_answers"].get(idx), "correct": True} in question["answers"]
+            )
+            
+            st.markdown("---")
+            if correct_count == len(state["questions"]):
+                st.balloons()
+                st.success(f"🎉 완벽해요! 모든 문제를 맞추셨습니다! ({correct_count}/{len(state['questions'])})")
+                state["is_completed"] = True
+            else:
+                st.error(f"결과: {correct_count}/{len(state['questions'])} 정답")
+                
+                if st.button("🔄 다시 풀기", key="retry"):
+                    st.session_state.quiz_state = {
+                        "selected_button": state["selected_button"],
+                        "questions": None,
+                        "is_submitted": False,
+                        "is_completed": False,
+                        "user_answers": {}
+                    }
+                    st.rerun()
 
-        button = st.form_submit_button()
+    elif state["is_completed"]:
+        st.success("✅ 이미 완료한 퀴즈입니다! 다른 난이도를 선택해주세요.")
