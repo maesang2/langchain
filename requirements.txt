@@ -9,3 +9,5 @@ tiktoken
 faiss-cpu
 pypdf
 python-dotenv
+wikipedia
+unstructured
