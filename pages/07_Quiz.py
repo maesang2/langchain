@@ -72,7 +72,7 @@ function = {
 
 llm = ChatOpenAI(
     temperature=1,
-    # api_key=api_key,
+    api_key=api_key,
     model="gpt-5-nano",
     streaming=True,
     callbacks=[StreamingStdOutCallbackHandler()]
